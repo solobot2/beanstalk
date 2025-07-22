@@ -12,7 +12,7 @@ permalink: /jobs
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
 // This step not required if you included a tube query parameter when creating the client
-$beanstalk->use('foobar');
+$beanstalk->use('foobar')->await();
 
 $payload = json_encode([
     "job" => bin2hex(random_bytes(16)),
@@ -20,7 +20,7 @@ $payload = json_encode([
     "path" => "/path/to/image.png"
 ]);
 
-$jobId = yield $beanstalk->put($payload);
+$jobId = $beanstalk->put($payload)->await();
 ```
 
 ## Pulling Jobs off a Queue
@@ -28,18 +28,18 @@ $jobId = yield $beanstalk->put($payload);
 ```php
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
-$beanstalk->watch('foobar');
+$beanstalk->watch('foobar')->await();
 
-while([$jobId, $jobData] = yield $beanstalk->reserve()) {
+while([$jobId, $jobData] = $beanstalk->reserve()->await()) {
     // Work the job using $jobData
     // Once you're finished, delete the job
-    yield $beanstalk->delete($jobId);
+    $beanstalk->delete($jobId)->await();
     
     // If there was an error, you can bury the job for inspection later
-    yield $beanstalk->bury($jobId);
+    $beanstalk->bury($jobId)->await();
     
     // Of you can release the job, to be picked up by a new worker
-    yield $beanstalk->release($jobId);
+    $beanstalk->release($jobId)->await();
 }
 ```
 
@@ -48,12 +48,12 @@ while([$jobId, $jobData] = yield $beanstalk->reserve()) {
 ```php
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
-$beanstalk->watch('foobar');
+$beanstalk->watch('foobar')->await();
 
-while([$jobId, $jobData] = yield $beanstalk->reserve()) {
+while([$jobId, $jobData] = $beanstalk->reserve()->await()) {
     // Work the job
     // If you still need time to work the job, you can utilize the touch command
-    yield $beantstalk->touch($jobId);
+    $beantstalk->touch($jobId)->await();
 }
 ```
 
@@ -62,6 +62,6 @@ while([$jobId, $jobData] = yield $beanstalk->reserve()) {
 ```php
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
-$jobStats = yield $beanstalk->getJobStats($jobId = 42);
+$jobStats = $beanstalk->getJobStats($jobId = 42)->await();
 $jobStats->state; // ready
 ```

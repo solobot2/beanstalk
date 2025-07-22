@@ -3,128 +3,150 @@
 namespace Amp\Beanstalk\Test;
 
 use Amp\Beanstalk\BeanstalkClient;
+use Amp\Beanstalk\NotFoundException;
 use Amp\Beanstalk\Stats\Job;
 use Amp\Beanstalk\Stats\System;
-use function Amp\call;
-use function Amp\Promise\wait;
+
 use PHPUnit\Framework\TestCase;
 
-class IntegrationTest extends TestCase {
-    /** @var BeanstalkClient */
-    private $beanstalk;
+use function getenv;
 
-    public function setUp() {
-        if (!\getenv("AMP_TEST_BEANSTALK_INTEGRATION") && !\getenv("TRAVIS")) {
-            $this->markTestSkipped("You need to set AMP_TEST_BEANSTALK_INTEGRATION=1 in order to run the integration tests.");
+class IntegrationTest extends TestCase
+{
+    /** @var BeanstalkClient */
+    private $beanstalk = null;
+
+    private $tubeName = 'tests';
+
+    public function setUp(): void
+    {
+        if (!getenv("AMP_TEST_BEANSTALK_INTEGRATION") && !getenv("TRAVIS")) {
+             $this->markTestSkipped("You need to set AMP_TEST_BEANSTALK_INTEGRATION=1 in order to run the integration tests.");
         }
 
+        $this->beanstalk?->quit();
+
         $this->beanstalk = new BeanstalkClient("tcp://127.0.0.1:11300");
+        $this->beanstalk->use($this->tubeName);
+        $this->beanstalk->watch($this->tubeName);
 
-        wait(call(function () {
-            /** @var System $stats */
-            $stats = yield $this->beanstalk->getSystemStats();
-            for ($jobId = 1; $jobId <= $stats->totalJobs; $jobId++) {
-                yield $this->beanstalk->delete($jobId);
-            }
-        }));
+        /** @var System $stats */
+
+        try {
+            do {
+                $jobId = $this->beanstalk->peekReady(true)->await();
+                $this->beanstalk->delete($jobId)->await();
+            } while (true);
+        } catch (NotFoundException) {
+        }
+        try {
+            do {
+                $jobId = $this->beanstalk->peekDelayed(true)->await();
+                $this->beanstalk->delete($jobId)->await();
+            } while (true);
+        } catch (NotFoundException) {
+        }
+
+        try {
+            do {
+                $jobId = $this->beanstalk->peekBuried(true)->await();
+                $this->beanstalk->delete($jobId)->await();
+            } while (true);
+        } catch (NotFoundException) {
+        }
     }
 
-    public function testPut() {
-        wait(call(function () {
-            /** @var System $statsBefore */
-            $statsBefore = yield $this->beanstalk->getSystemStats();
+    public function testPut()
+    {
+        /** @var System $statsBefore */
+        $statsBefore = $this->beanstalk->getSystemStats()->await();
 
-            $jobId = yield $this->beanstalk->put("hi");
-            $this->assertInternalType("int", $jobId);
+        $jobId = $this->beanstalk->put("hi")->await();
 
-            /** @var Job $jobStats */
-            $jobStats = yield $this->beanstalk->getJobStats($jobId);
+        $this->assertIsInt($jobId);
 
-            $this->assertSame($jobId, $jobStats->id);
-            $this->assertSame(0, $jobStats->priority);
-            $this->assertSame(0, $jobStats->delay);
+        /** @var Job $jobStats */
+        $jobStats = $this->beanstalk->getJobStats($jobId)->await();
 
-            /** @var System $statsAfter */
-            $statsAfter = yield $this->beanstalk->getSystemStats();
+        $this->assertSame($jobId, $jobStats->id);
+        $this->assertSame(0, $jobStats->priority);
+        $this->assertSame(0, $jobStats->delay);
 
-            $this->assertSame($statsBefore->cmdPut + 1, $statsAfter->cmdPut);
-        }));
+        /** @var System $statsAfter */
+        $statsAfter = $this->beanstalk->getSystemStats()->await();
+
+        $this->assertSame($statsBefore->cmdPut + 1, $statsAfter->cmdPut);
     }
 
-    public function testPeek() {
-        wait(call(function () {
-            $jobId = yield $this->beanstalk->put('I am ready');
-            $this->assertInternalType("int", $jobId);
+    public function testPeek()
+    {
+        $jobId = $this->beanstalk->put('I am ready')->await();
+        $this->assertIsInt($jobId);
 
-            $peekedJob = yield $this->beanstalk->peek($jobId);
-            $this->assertEquals('I am ready', $peekedJob);
+        $peekedJob = $this->beanstalk->peek($jobId)->await();
+        $this->assertEquals('I am ready', $peekedJob);
 
-            $peekedJob = yield $this->beanstalk->peekReady();
-            $this->assertEquals('I am ready', $peekedJob);
+        $peekedJob = $this->beanstalk->peekReady()->await();
+        $this->assertEquals('I am ready', $peekedJob);
 
-            list($jobId) = yield $this->beanstalk->reserve();
-            $buried = yield $this->beanstalk->bury($jobId);
+        [$jobId] = $this->beanstalk->reserve()->await();
+        $buried = $this->beanstalk->bury($jobId)->await();
+        $this->assertEquals(1, $buried);
+        $peekedJob = $this->beanstalk->peekBuried()->await();
+        $this->assertEquals('I am ready', $peekedJob);
+
+        $jobId = $this->beanstalk->put('I am delayed', 60, 60)->await();
+        $peekedJob = $this->beanstalk->peekDelayed()->await();
+        $this->assertEquals('I am delayed', $peekedJob);
+    }
+
+    public function testKickJob()
+    {
+        $jobId = $this->beanstalk->put("hi")->await();
+        $this->assertIsInt($jobId);
+
+        $kicked = $this->beanstalk->kickJob($jobId)->await();
+        $this->assertFalse($kicked);
+
+        [$jobId,] = $this->beanstalk->reserve()->await();
+        $buried = $this->beanstalk->bury($jobId)->await();
+        $this->assertEquals(1, $buried);
+        /** @var Job $jobStats */
+        $jobStats = $this->beanstalk->getJobStats($jobId)->await();
+        $this->assertEquals('buried', $jobStats->state);
+
+        $kicked = $this->beanstalk->kickJob($jobId)->await();
+        $this->assertTrue($kicked);
+    }
+
+    public function testKick()
+    {
+        for ($i = 0; $i < 10; $i++) {
+            $this->beanstalk->put("Job $i")->await();
+        }
+        for ($i = 0; $i < 8; $i++) {
+            [$jobId,] = $this->beanstalk->reserve()->await();
+            $buried = $this->beanstalk->bury($jobId)->await();
             $this->assertEquals(1, $buried);
-            $peekedJob = yield $this->beanstalk->peekBuried();
-            $this->assertEquals('I am ready', $peekedJob);
+        }
 
-            $jobId = yield $this->beanstalk->put('I am delayed', 60, 60);
-            $peekedJob = yield $this->beanstalk->peekDelayed();
-            $this->assertEquals('I am delayed', $peekedJob);
-        }));
+        $kicked = $this->beanstalk->kick(4)->await();
+        $this->assertEquals(4, $kicked);
+
+        $kicked = $this->beanstalk->kick(10)->await();
+        $this->assertEquals(4, $kicked);
+
+        $kicked = $this->beanstalk->kick(1)->await();
+        $this->assertEquals(0, $kicked);
     }
 
-    public function testKickJob() {
-        wait(call(function () {
-            $jobId = yield $this->beanstalk->put("hi");
-            $this->assertInternalType("int", $jobId);
+    public function testReservedJobShouldHaveTheSamePayloadAsThePutPayload()
+    {
+        $jobId = $this->beanstalk->put(str_repeat('*', 65535))->await();
 
-            $kicked = yield $this->beanstalk->kickJob($jobId);
-            $this->assertFalse($kicked);
+        [$reservedJobId, $reservedJobPayload] = $this->beanstalk->reserve()->await();
 
-            list($jobId, ) = yield $this->beanstalk->reserve();
-            $buried = yield $this->beanstalk->bury($jobId);
-            $this->assertEquals(1, $buried);
-            /** @var Job $jobStats */
-            $jobStats = yield $this->beanstalk->getJobStats($jobId);
-            $this->assertEquals('buried', $jobStats->state);
-
-            $kicked = yield $this->beanstalk->kickJob($jobId);
-            $this->assertTrue($kicked);
-        }));
-    }
-
-    public function testKick() {
-        wait(call(function () {
-            for ($i = 0; $i < 10; $i++) {
-                yield $this->beanstalk->put("Job $i");
-            }
-            for ($i = 0; $i < 8; $i++) {
-                list($jobId, ) = yield $this->beanstalk->reserve();
-                $buried = yield $this->beanstalk->bury($jobId);
-                $this->assertEquals(1, $buried);
-            }
-
-            $kicked = yield $this->beanstalk->kick(4);
-            $this->assertEquals(4, $kicked);
-
-            $kicked = yield $this->beanstalk->kick(10);
-            $this->assertEquals(4, $kicked);
-
-            $kicked = yield $this->beanstalk->kick(1);
-            $this->assertEquals(0, $kicked);
-        }));
-    }
-
-    public function testReservedJobShouldHaveTheSamePayloadAsThePutPayload() {
-        wait(call(function () {
-            $jobId = yield $this->beanstalk->put(str_repeat('*', 65535));
-
-            yield $this->beanstalk->watch('default');
-            list($reservedJobId, $reservedJobPayload) = yield $this->beanstalk->reserve();
-
-            $this->assertSame($jobId, $reservedJobId);
-            $this->assertSame(65535, strlen($reservedJobPayload));
-        }));
+        $this->assertSame($jobId, $reservedJobId);
+        $this->assertSame(65535, strlen($reservedJobPayload));
     }
 }

@@ -3,16 +3,16 @@
 require __DIR__ . '/../vendor/autoload.php';
 
 use Amp\Beanstalk\BeanstalkClient;
-use Amp\Loop;
+use Revolt\EventLoop;
 
-Loop::run(function () {
+EventLoop::queue(function () {
     $beanstalk = new BeanstalkClient("tcp://127.0.0.1:11300");
-    yield $beanstalk->watch('foobar');
+    $beanstalk->watch('foobar')->await();
 
-    while (list($jobId, $payload) = yield $beanstalk->reserve()) {
+    while (list($jobId, $payload) = $beanstalk->reserve()->await()) {
         echo "Job id: $jobId\n";
         echo "Payload: $payload\n";
 
-        $beanstalk->delete($jobId);
+        $beanstalk->delete($jobId)->await();
     }
 });

@@ -10,7 +10,8 @@ class ParserTest extends TestCase {
 
     protected $parsedElements;
 
-    public function setUp() {
+    public function setUp(): void
+    {
         $this->parserToTest = new Parser(function ($result) {
             $this->parsedElements = $result;
         });

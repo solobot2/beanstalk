@@ -3,3 +3,4 @@
 /vendor/
 /protocol.txt
 /.php_cs.cache
+/.idea/

@@ -4,15 +4,15 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use Amp\Beanstalk\BeanstalkClient;
 use Amp\Beanstalk\Stats\System;
-use Amp\Loop;
 
-Loop::run(function () {
+
+Revolt\EventLoop::queue(function () {
     $beanstalk = new BeanstalkClient("tcp://127.0.0.1:11300");
 
     /**
      * @var System $systemStats
      */
-    $systemStats = yield $beanstalk->getSystemStats();
+    $systemStats = $beanstalk->getSystemStats()->await();
     echo "Active connections: {$systemStats->currentConnections}\n";
     echo "Jobs ready: {$systemStats->currentJobsReady}\n";
 

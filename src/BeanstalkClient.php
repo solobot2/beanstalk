@@ -5,41 +5,42 @@ namespace Amp\Beanstalk;
 use Amp\Beanstalk\Stats\Job;
 use Amp\Beanstalk\Stats\System;
 use Amp\Beanstalk\Stats\Tube;
-use function Amp\call;
-use Amp\Deferred;
-use Amp\Promise;
+use Amp\DeferredFuture;
+use Amp\Future;
 use Amp\Uri\Uri;
 use Symfony\Component\Yaml\Yaml;
 use Throwable;
 
-class BeanstalkClient {
-    /** @var Deferred[] */
-    private $deferreds;
+use function Amp\async;
+
+class BeanstalkClient
+{
+    /** @var DeferredFuture[] */
+    private array $deferreds = [];
 
     /** @var Connection */
-    private $connection;
+    private Connection $connection;
 
-    /** @var string */
-    private $tube;
+    /** @var string|null */
+    private ?string $tube = null;
 
-    public function __construct(string $uri) {
+    public function __construct(string $uri)
+    {
         $this->applyUri($uri);
-
-        $this->deferreds = [];
 
         $this->connection = new Connection($uri);
         $this->connection->addEventHandler("response", function ($response) {
-            /** @var Deferred $deferred */
+            /** @var DeferredFuture $deferred */
             $deferred = array_shift($this->deferreds);
 
             if ($response instanceof Throwable) {
-                $deferred->fail($response);
+                $deferred->error($response);
             } else {
-                $deferred->resolve($response);
+                $deferred->complete($response);
             }
         });
 
-        $this->connection->addEventHandler("error", function (Throwable $error = null) {
+        $this->connection->addEventHandler("error", function (?Throwable $error = null) {
             if ($error) {
                 $this->failAllDeferreds($error);
             }
@@ -50,41 +51,45 @@ class BeanstalkClient {
 
         if ($this->tube) {
             $this->connection->addEventHandler("connect", function () {
-                array_unshift($this->deferreds, new Deferred);
+                array_unshift($this->deferreds, new DeferredFuture());
 
                 return "use $this->tube\r\n";
             });
         }
     }
 
-    private function applyUri(string $uri) {
+    private function applyUri(string $uri): void
+    {
         $this->tube = (new Uri($uri))->getQueryParameter("tube");
     }
 
-    private function send(string $message, callable $transform = null): Promise {
-        return call(function () use ($message, $transform) {
-            $this->deferreds[] = $deferred = new Deferred;
-            $promise = $deferred->promise();
+    private function send(string $message, ?callable $transform = null): Future
+    {
+        return async(function () use ($message, $transform) {
+            $this->deferreds[] = $deferred = new DeferredFuture();
+            $promise = $deferred->getFuture();
 
-            yield $this->connection->send($message);
-            $response = yield $promise;
+            $this->connection->send($message)->await();
+            $response = $promise->await();
 
             return $transform ? $transform($response) : $response;
         });
     }
 
-    public function use(string $tube) {
+    public function use(string $tube): Future
+    {
         return $this->send("use " . $tube . "\r\n", function () use ($tube) {
             $this->tube = $tube;
             return null;
         });
     }
 
-    public function pause(string $tube, int $delay): Promise {
+    public function pause(string $tube, int $delay): Future
+    {
         $payload = "pause-tube $tube $delay\r\n";
 
         return $this->send($payload, function (array $response) use ($tube) {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "PAUSED":
@@ -99,16 +104,17 @@ class BeanstalkClient {
         });
     }
 
-    public function put(string $payload, int $timeout = 60, int $delay = 0, $priority = 0): Promise {
+    public function put(string $payload, int $timeout = 60, int $delay = 0, $priority = 0): Future
+    {
         $payload = "put $priority $delay $timeout " . strlen($payload) . "\r\n$payload\r\n";
 
         return $this->send($payload, function (array $response): int {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "INSERTED":
                 case "BURIED":
-                    return (int) $response[1];
+                    return (int)$response[1];
 
                 case "EXPECTED_CRLF":
                     throw new ExpectedCrlfException;
@@ -125,11 +131,12 @@ class BeanstalkClient {
         });
     }
 
-    public function reserve(int $timeout = null): Promise {
+    public function reserve(?int $timeout = null): Future
+    {
         $payload = $timeout === null ? "reserve\r\n" : "reserve-with-timeout $timeout\r\n";
 
         return $this->send($payload, function (array $response): array {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "DEADLINE_SOON":
@@ -147,11 +154,12 @@ class BeanstalkClient {
         });
     }
 
-    public function delete(int $id): Promise {
+    public function delete(int $id): Future
+    {
         $payload = "delete $id\r\n";
 
-        return $this->send($payload, function (array $response): int {
-            list($type) = $response;
+        return $this->send($payload, function (array $response): bool {
+            [$type] = $response;
 
             switch ($type) {
                 case "DELETED":
@@ -166,11 +174,12 @@ class BeanstalkClient {
         });
     }
 
-    public function release(int $id, int $delay = 0, int $priority = 0): Promise {
+    public function release(int $id, int $delay = 0, int $priority = 0): Future
+    {
         $payload = "release $id $priority $delay\r\n";
 
         return $this->send($payload, function (array $response): string {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "BURIED":
@@ -184,11 +193,12 @@ class BeanstalkClient {
         });
     }
 
-    public function bury(int $id, int $priority = 0): Promise {
+    public function bury(int $id, int $priority = 0): Future
+    {
         $payload = "bury $id $priority\r\n";
 
-        return $this->send($payload, function (array $response): int {
-            list($type) = $response;
+        return $this->send($payload, function (array $response): bool {
+            [$type] = $response;
 
             switch ($type) {
                 case "BURIED":
@@ -203,11 +213,12 @@ class BeanstalkClient {
         });
     }
 
-    public function kickJob(int $id): Promise {
+    public function kickJob(int $id): Future
+    {
         $payload = "kick-job $id\r\n";
 
         return $this->send($payload, function (array $response): bool {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "KICKED":
@@ -222,15 +233,16 @@ class BeanstalkClient {
         });
     }
 
-    public function kick(int $count): Promise {
+    public function kick(int $count): Future
+    {
         $payload = "kick $count\r\n";
 
         return $this->send($payload, function (array $response): int {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "KICKED":
-                    return (int) $response[1];
+                    return (int)$response[1];
 
                 default:
                     throw new BeanstalkException("Unknown response: $type");
@@ -238,11 +250,12 @@ class BeanstalkClient {
         });
     }
 
-    public function touch(int $id): Promise {
+    public function touch(int $id): Future
+    {
         $payload = "touch $id\r\n";
 
-        return $this->send($payload, function (array $response): int {
-            list($type) = $response;
+        return $this->send($payload, function (array $response): bool {
+            [$type] = $response;
 
             switch ($type) {
                 case "TOUCHED":
@@ -257,7 +270,8 @@ class BeanstalkClient {
         });
     }
 
-    public function watch(string $tube): Promise {
+    public function watch(string $tube): Future
+    {
         $payload = "watch $tube\r\n";
 
         return $this->send($payload, function (array $response): int {
@@ -265,19 +279,20 @@ class BeanstalkClient {
                 throw new BeanstalkException("Unknown response: " . $response[0]);
             }
 
-            return (int) $response[1];
+            return (int)$response[1];
         });
     }
 
-    public function ignore(string $tube): Promise {
+    public function ignore(string $tube): Future
+    {
         $payload = "ignore $tube\r\n";
 
         return $this->send($payload, function (array $response): int {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "WATCHING":
-                    return (int) $response[1];
+                    return (int)$response[1];
 
                 case "NOT_IGNORED":
                     throw new NotIgnoredException;
@@ -288,15 +303,17 @@ class BeanstalkClient {
         });
     }
 
-    public function quit() {
+    public function quit(): void
+    {
         $this->send("quit\r\n");
     }
 
-    public function getJobStats(int $id): Promise {
+    public function getJobStats(int $id): Future
+    {
         $payload = "stats-job $id\r\n";
 
         return $this->send($payload, function (array $response) use ($id): Job {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "OK":
@@ -311,11 +328,12 @@ class BeanstalkClient {
         });
     }
 
-    public function getTubeStats(string $tube): Promise {
+    public function getTubeStats(string $tube): Future
+    {
         $payload = "stats-tube $tube\r\n";
 
         return $this->send($payload, function (array $response) use ($tube): Tube {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "OK":
@@ -330,7 +348,8 @@ class BeanstalkClient {
         });
     }
 
-    public function getSystemStats(): Promise {
+    public function getSystemStats(): Future
+    {
         $payload = "stats\r\n";
 
         return $this->send($payload, function (array $response): System {
@@ -342,11 +361,12 @@ class BeanstalkClient {
         });
     }
 
-    public function listTubes(): Promise {
+    public function listTubes(): Future
+    {
         $payload = "list-tubes\r\n";
 
         return $this->send($payload, function (array $response): array {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "OK":
@@ -358,11 +378,12 @@ class BeanstalkClient {
         });
     }
 
-    public function listWatchedTubes(): Promise {
+    public function listWatchedTubes(): Future
+    {
         $payload = "list-tubes-watched\r\n";
 
         return $this->send($payload, function (array $response): array {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "OK":
@@ -374,11 +395,12 @@ class BeanstalkClient {
         });
     }
 
-    public function getUsedTube(): Promise {
+    public function getUsedTube(): Future
+    {
         $payload = "list-tube-used\r\n";
 
         return $this->send($payload, function (array $response): string {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "USING":
@@ -390,11 +412,12 @@ class BeanstalkClient {
         });
     }
 
-    public function peek(int $id): Promise {
+    public function peek(int $id): Future
+    {
         $payload = "peek $id\r\n";
 
         return $this->send($payload, function (array $response) use ($id): string {
-            list($type) = $response;
+            [$type] = $response;
 
             switch ($type) {
                 case "FOUND":
@@ -409,28 +432,35 @@ class BeanstalkClient {
         });
     }
 
-    public function peekReady(): Promise {
-        return $this->peekInState('ready');
+    public function peekReady(bool $peekId = false): Future
+    {
+        return $this->peekInState('ready', $peekId);
     }
 
-    public function peekDelayed(): Promise {
-        return $this->peekInState('delayed');
+    public function peekDelayed(bool $peekId = false): Future
+    {
+        return $this->peekInState('delayed', $peekId);
     }
 
-    public function peekBuried(): Promise {
-        return $this->peekInState('buried');
+    public function peekBuried(bool $peekId = false): Future
+    {
+        return $this->peekInState('buried', $peekId);
     }
 
-    private function peekInState(string $state): Promise {
+    private function peekInState(string $state, bool $peekId = false): Future
+    {
         $payload = "peek-$state\r\n";
 
         return $this->send(
             $payload,
-            function (array $response) use ($state): string {
-                list($type) = $response;
+            function (array $response) use ($state, $peekId): string {
+                [$type] = $response;
 
                 switch ($type) {
                     case "FOUND":
+                        if ($peekId) {
+                            return $response[1];
+                        }
                         return $response[2];
 
                     case "NOT_FOUND":
@@ -443,12 +473,12 @@ class BeanstalkClient {
         );
     }
 
-    private function failAllDeferreds(Throwable $error) {
-        // Fail any outstanding promises
+    private function failAllDeferreds(Throwable $error): void
+    {
         while ($this->deferreds) {
-            /** @var Deferred $deferred */
+            /** @var DeferredFuture $deferred */
             $deferred = array_shift($this->deferreds);
-            $deferred->fail($error);
+            $deferred->error($error);
         }
     }
 }
