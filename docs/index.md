@@ -12,7 +12,8 @@ composer require amphp/beanstalk
 
 ## Usage
 
-Connecting to a [Beanstalk][beanstalk] server.
+Connecting to a [Beanstalk][beanstalk] server. All command methods return
+`Amp\Future`; await the returned future with `->await()`.
 
 ```php
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");

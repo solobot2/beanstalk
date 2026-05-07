@@ -14,20 +14,22 @@ By default Beanstalk will use the default tube for reserving and storing new job
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
 // This will store the job on the "default" tube.
-$jobId = $beanstalk->put($payload = json_encode([
+$payload = json_encode([
     "job" => bin2hex(random_bytes(16)),
-    "type" => "compress-image"
+    "type" => "compress-image",
     "path" => "/path/to/image.png"
-]))->await();
+]);
+$jobId = $beanstalk->put($payload)->await();
 
 $beanstalk->use('foobar')->await();
 
 // This will store the job on the "foobar" tube.
-$jobId = $beanstalk->put($payload = json_encode([
+$payload = json_encode([
     "job" => bin2hex(random_bytes(16)),
-    "type" => "compress-image"
+    "type" => "compress-image",
     "path" => "/path/to/image.png"
-]))->await();
+]);
+$jobId = $beanstalk->put($payload)->await();
 ```
 
 ## Pausing a Tube
@@ -37,7 +39,7 @@ If you need to pause a tube, preventing any new jobs from being reserved, you ca
 ```php
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
-$beanstalk->pause($tube = 'foobar')->await();
+$beanstalk->pause($tube = 'foobar', $delay = 60)->await();
 ```
 
 ## Watching and Ignoring Tubes
@@ -47,9 +49,9 @@ By default when you reserve a job you'll either pull from the `default` tube, or
 ```php
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
- $beanstalk->watch($tube = 'foobar')->await();
- $beanstalk->watch($tube = 'barbaz')->await();
- $beanstalk->ignore($tube = 'default')->await();
+$beanstalk->watch($tube = 'foobar')->await();
+$beanstalk->watch($tube = 'barbaz')->await();
+$beanstalk->ignore($tube = 'default')->await();
 // Watchlist will contain "foobar" and "barbaz"
 ```
 
@@ -60,9 +62,9 @@ To find out which tubes your connection is currently watching.
 ```php
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
- $beanstalk->watch($tube = 'foobar')->await();
- $beanstalk->watch($tube = 'barbaz')->await();
- $beanstalk->ignore($tube = 'default')->await();
+$beanstalk->watch($tube = 'foobar')->await();
+$beanstalk->watch($tube = 'barbaz')->await();
+$beanstalk->ignore($tube = 'default')->await();
 
 $watchlist = $beanstalk->listWatchedTubes()->await();
 ```
@@ -74,7 +76,7 @@ If you need to see a list of all the tubes that exist on the server.
 ```php
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
-$tubes =  $beanstalk->listTubes()->await();
+$tubes = $beanstalk->listTubes()->await();
 ```
 
 ## Get the Tube Being Used
@@ -94,5 +96,5 @@ To see what stats are available for a tube, checkout the [Tube](classes/tube) cl
 ```php
 $beanstalk = new Amp\Beanstalk\BeanstalkClient("tcp://127.0.0.1:11300");
 
-$stats =  $beanstalk->getTubeStats($tube = 'default')->await();
+$stats = $beanstalk->getTubeStats($tube = 'default')->await();
 ```

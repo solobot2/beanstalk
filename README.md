@@ -14,7 +14,7 @@ composer require amphp/beanstalk
 
 ## Examples
 
-More extensive code examples reside in the [`examples`](./examples) directory.
+All command methods return `Amp\Future`. Await the returned future with `->await()`.
 
 ```php
 <?php
@@ -22,25 +22,21 @@ More extensive code examples reside in the [`examples`](./examples) directory.
 require __DIR__ . '/../vendor/autoload.php';
 
 use Amp\Beanstalk\BeanstalkClient;
-use Amp\Loop;
 
-Loop::run(function () {
-    $beanstalk = new BeanstalkClient("tcp://127.0.0.1:11300");
-    yield $beanstalk->use('sometube');
+$beanstalk = new BeanstalkClient("tcp://127.0.0.1:11300");
+$beanstalk->use('sometube')->await();
 
-    $payload = json_encode([
-        "job" => bin2hex(random_bytes(16)),
-        "type" => "compress-image",
-        "path" => "/path/to/image.png"
-    ]);
+$payload = json_encode([
+    "job" => bin2hex(random_bytes(16)),
+    "type" => "compress-image",
+    "path" => "/path/to/image.png"
+]);
 
-    $jobId = yield $beanstalk->put($payload);
+$jobId = $beanstalk->put($payload)->await();
 
-    echo "Inserted job id: $jobId\n";
+echo "Inserted job id: $jobId\n";
 
-    $beanstalk->quit();
-});
-
+$beanstalk->quit();
 ```
 ## License
 

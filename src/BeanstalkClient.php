@@ -11,8 +11,6 @@ use Amp\Uri\Uri;
 use Symfony\Component\Yaml\Yaml;
 use Throwable;
 
-use function Amp\async;
-
 class BeanstalkClient
 {
     /** @var DeferredFuture[] */
@@ -65,7 +63,7 @@ class BeanstalkClient
 
     private function send(string $message, ?callable $transform = null): Future
     {
-        return async(function () use ($message, $transform) {
+        return \Amp\async(function () use ($message, $transform) {
             $this->deferreds[] = $deferred = new DeferredFuture();
             $promise = $deferred->getFuture();
 
@@ -432,35 +430,32 @@ class BeanstalkClient
         });
     }
 
-    public function peekReady(bool $peekId = false): Future
+    public function peekReady(): Future
     {
-        return $this->peekInState('ready', $peekId);
+        return $this->peekInState('ready');
     }
 
-    public function peekDelayed(bool $peekId = false): Future
+    public function peekDelayed(): Future
     {
-        return $this->peekInState('delayed', $peekId);
+        return $this->peekInState('delayed');
     }
 
-    public function peekBuried(bool $peekId = false): Future
+    public function peekBuried(): Future
     {
-        return $this->peekInState('buried', $peekId);
+        return $this->peekInState('buried');
     }
 
-    private function peekInState(string $state, bool $peekId = false): Future
+    private function peekInState(string $state): Future
     {
         $payload = "peek-$state\r\n";
 
         return $this->send(
             $payload,
-            function (array $response) use ($state, $peekId): string {
+            function (array $response) use ($state): string {
                 [$type] = $response;
 
                 switch ($type) {
                     case "FOUND":
-                        if ($peekId) {
-                            return $response[1];
-                        }
                         return $response[2];
 
                     case "NOT_FOUND":

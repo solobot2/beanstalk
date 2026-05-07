@@ -4,8 +4,8 @@
     "license": "MIT",
     "authors": [
         {
-            "name": "Niklas Keller",
-            "email": "me@kelunik.com"
+            "name": "Phil",
+            "email": "phil@pocketguard.com"
         }
     ],
     "autoload": {
@@ -15,13 +15,13 @@
     },
     "require": {
         "amphp/amp": "^3",
-        "amphp/socket": "^2",
-        "amphp/uri": "^0.1",
+        "amphp/socket": "^2.3",
+        "amphp/uri": "^0.1.4",
         "symfony/yaml": "^3.3|^4|^5"
     },
     "require-dev": {
-        "amphp/phpunit-util": "^v3.0.0",
-        "phpunit/phpunit": "^9",
+        "amphp/phpunit-util": "^1",
+        "phpunit/phpunit": "^6",
         "friendsofphp/php-cs-fixer": "^2.3"
     },
     "config": {
